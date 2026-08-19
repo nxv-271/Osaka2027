@@ -1,8 +1,6 @@
 // 大阪2027 旅行小工具 - Service Worker
-// 目的：離線時仍可開啟 App、看行程、看所有地圖／照片原圖。
-// 每次更新內容（新增地圖、修改行程文字）時，請把 CACHE_NAME 的版本號 +1，
-// 這樣 iPhone 上的舊快取才會被換掉。
-const CACHE_NAME = 'osaka2027-v2';
+// v3：頁面導覽改為 network-first，避免 iPhone PWA 長期卡在舊 index.html。
+const CACHE_NAME = 'osaka2027-v3';
 
 const PRECACHE_URLS = [
   './',
@@ -47,8 +45,27 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  // 導覽頁面：優先拿網路最新版，失敗才回離線快取。
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req, { cache: 'no-store' })
+        .then((res) => {
+          if (res && res.status === 200) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', clone));
+          }
+          return res;
+        })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // 圖片、icon 等靜態檔案：cache-first，保留離線能力。
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
@@ -59,9 +76,6 @@ self.addEventListener('fetch', (event) => {
             caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
           }
           return res;
-        })
-        .catch(() => {
-          if (req.mode === 'navigate') return caches.match('./index.html');
         });
     })
   );
